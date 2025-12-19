@@ -1,4 +1,3 @@
-
 # PowerShell script to download the 'Photo of the Day' from The Guardian and send it to a local printer
 
 # Define the URL for The Guardian's 'Photo of the Day' page
@@ -14,64 +13,73 @@ if (-Not (Test-Path -Path $outputFolder)) {
     New-Item -ItemType Directory -Path $outputFolder -Force
 }
 
-# Define a function to download the photo
-function Download-PhotoOfTheDay {
+function Download-Potd {
     try {
-        # Use Invoke-WebRequest to retrieve the HTML content
+        #retrieve the POTD content
         $htmlContent = Invoke-WebRequest -Uri $photoOfTheDayUrl
 
-        # Extract the 'Gallery' link (look for an <a> tag with href beginning with '/news/gallery/')
+        #find link to the Gallery
         $galleryLink = $htmlContent.Links |
             Where-Object { ![String]::IsNullOrEmpty($_.href) } |
             Where-Object { $_.href -like '/news/gallery/*' } |
             Select-Object -First 1
 
         if (-Not $galleryLink) {
-            Write-Error "Failed to find the 'Gallery' link on the page."
+            Write-Error "Failed to find the gallery link on the page."
             return $false
         }
 
-
-        #build the uri
+        #construct an absolute URI for it
         $galleryPageUri = [System.Uri]::new([System.Uri]::new($photoOfTheDayUrl), $galleryLink.href)
         
-        # Follow the 'Gallery' link
-        $galleryPageContent = Invoke-WebRequest -Uri $galleryPageUri #-Headers @{ "referer" = "https://www.theguardian.com/" }
+        #retrieve the Gallery content
+        $galleryPageContent = Invoke-WebRequest -Uri $galleryPageUri -Headers @{ "referer" = $photoOfTheDayUrl }
         
-        # Pick one randomly from 10 largest on page
-        $randomImage = $galleryPageContent.Images |
+        #pick one of the images at random
+        $galleryImage = $galleryPageContent.Images |
+            Sort-Object { $_.width * $_.height } -Descending |
+            Select-Object -First 10 |
+            #Get-SecureRandom -Shuffle |
+            Select-Object -First 1
+
+        if (-Not $galleryImage) {
+            Write-Error "Failed to find a gallery image."
+            return $false
+        }
+
+        #pick one of the images at random
+        $galleryImage = $galleryPageContent.Images |
             Sort-Object { $_.width * $_.height } -Descending |
             Select-Object -First 10 |
             Get-SecureRandom -Shuffle |
             Select-Object -First 1
 
+        #build a new URI for 4x the default size
+        $imageUri = [System.Uri]::new($galleryImage.src.Replace("&amp;","&"))
+        $nvc = [System.Web.HttpUtility]::ParseQueryString($imageUri.Query)
+        $query = "?width=" + ([Int32]::Parse($nvc["width"]) * 4) + "&dpr=1&s=none&crop=none"
 
+        $constructedImageUrl = $imageUri.AbsoluteUri.Substring(0, $imageUri.AbsoluteUri.Length - $imageUri.Query.Length) + $query
 
-        $imageUri = [System.Uri]::new($randomImage.src.Replace("&amp;","&"))
-            $nvc = [System.Web.HttpUtility]::ParseQueryString($imageUri.Query)
-            $query = "?width=" + ([Int32]::Parse($nvc["width"]) * 4) + "&dpr=1&s=none&crop=none"
+        #check we constructed one ok
+        if (-Not $constructedImageUrl) {
+            Write-Error "Failed to build a valid image URL."
+            return $false
+        }
 
-       $imageUrl = $imageUri.AbsoluteUri.Substring(0, $imageUri.AbsoluteUri.Length - $imageUri.Query.Length) + $query
-        
-
-
-       # Validate the image URL
-       if (-Not $imageUrl) {
-           Write-Error "Failed to find a valid image URL in the gallery."
-           return $false
-       }
-
-               # Download the image file
-       Invoke-WebRequest -Uri $imageUrl -OutFile $outputFilePath -Headers @{ "referer" = $photoOfTheDayUrl }
-       Write-Output "Photo downloaded successfully to $outputFilePath."        return $true
+        #download the image file
+        Invoke-WebRequest -Uri $constructedImageUrl -OutFile $outputFilePath -Headers @{ "referer" = $photoOfTheDayUrl }
+        Write-Output "Photo downloaded successfully to $outputFilePath."
+        return $true
     } catch {
         Write-Error "An error occurred while downloading the photo: $_"
         return $false
     }
 }
 
+
 # Define a function to send the photo to the printer
-function Print-Photo {
+function Print-Potd {
     try {
         # Check if the photo file exists
         if (-Not (Test-Path -Path $outputFilePath)) {
@@ -91,8 +99,8 @@ function Print-Photo {
 
 # Main execution
 Write-Output "Starting the download and print process..."
-if (Download-PhotoOfTheDay) {
-    Print-Photo
+if (Download-Potd) {
+    Print-Potd
 } else {
     Write-Output "Failed to download the photo. Process terminated."
 }

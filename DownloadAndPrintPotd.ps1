@@ -38,29 +38,31 @@ function Download-PhotoOfTheDay {
         # Follow the 'Gallery' link
         $galleryPageContent = Invoke-WebRequest -Uri $galleryPageUri #-Headers @{ "referer" = "https://www.theguardian.com/" }
         
-        # Find the image with the largest dimensions
-        $largestImage = $galleryPageContent.Images |
+        # Pick one randomly from 10 largest on page
+        $randomImage = $galleryPageContent.Images |
             Sort-Object { $_.width * $_.height } -Descending |
+            Select-Object -First 10 |
+            Get-SecureRandom -Shuffle |
             Select-Object -First 1
 
 
 
-        $largestImageUri = [System.Uri]::new($largestImage.src.Replace("&amp;","&"))
-            $nvc = [System.Web.HttpUtility]::ParseQueryString($largestImageUri.Query)
+        $imageUri = [System.Uri]::new($randomImage.src.Replace("&amp;","&"))
+            $nvc = [System.Web.HttpUtility]::ParseQueryString($imageUri.Query)
             $query = "?width=" + ([Int32]::Parse($nvc["width"]) * 4) + "&dpr=1&s=none&crop=none"
 
-       $largestImageUrl = $largestImageUri.AbsoluteUri.Substring(0, $largestImageUri.AbsoluteUri.Length - $largestImageUri.Query.Length) + $query
+       $imageUrl = $imageUri.AbsoluteUri.Substring(0, $imageUri.AbsoluteUri.Length - $imageUri.Query.Length) + $query
         
 
 
        # Validate the image URL
-       if (-Not $largestImageUrl) {
+       if (-Not $imageUrl) {
            Write-Error "Failed to find a valid image URL in the gallery."
            return $false
        }
 
                # Download the image file
-       Invoke-WebRequest -Uri $largestImageUrl -OutFile $outputFilePath -Headers @{ "referer" = $photoOfTheDayUrl }
+       Invoke-WebRequest -Uri $imageUrl -OutFile $outputFilePath -Headers @{ "referer" = $photoOfTheDayUrl }
        Write-Output "Photo downloaded successfully to $outputFilePath."        return $true
     } catch {
         Write-Error "An error occurred while downloading the photo: $_"
